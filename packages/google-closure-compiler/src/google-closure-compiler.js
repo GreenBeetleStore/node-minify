@@ -7,13 +7,15 @@
 /**
  * Module dependencies.
  */
-import compiler from 'google-closure-compiler';
+import path from 'path';
+import closureCompiler from 'google-closure-compiler';
 import { utils } from '@node-minify/utils';
 
 /**
  * Module variables.
  */
-const ClosureCompiler = compiler.jsCompiler;
+const { compiler } = closureCompiler;
+const tempFile = path.normalize(__dirname + '/temp-gcc.js');
 
 // the allowed flags, taken from https://github.com/google/closure-compiler
 const allowedFlags = [
@@ -49,16 +51,48 @@ const allowedFlags = [
  * @param {String} content
  * @param {Function} callback
  */
-const minifyGCC = ({ settings, content, callback, index }) => {
+/* eslint-disable no-unused-vars */
+const minifyGCC = async ({ settings, content, callback, index }) => {
+  /* eslint-enable no-unused-vars */
+  if (settings.content) {
+    utils.writeFile({ file: tempFile, content: settings.content });
+  }
   const options = applyOptions({}, settings.options);
-  const gcc = new ClosureCompiler(options);
-  const contentMinified = gcc.run([{ src: content }], (exitCode, stdOut, stdErr) => {
-    if (exitCode > 0 && callback) {
-      return callback(stdErr);
-    }
+  options.js = settings.input || tempFile;
+
+  let stdOutData = '';
+  let stdErrData = '';
+
+  const gcc = new compiler(options);
+  const compilerProcess = gcc.run();
+  compilerProcess.stdout.on('data', data => {
+    stdOutData += data;
   });
+  compilerProcess.stderr.on('data', data => {
+    stdErrData += data;
+  });
+
+  const results = await Promise.all([
+    new Promise(resolve => compilerProcess.on('close', resolve)),
+    new Promise(resolve => compilerProcess.stdout.on('end', resolve)),
+    new Promise(resolve => compilerProcess.stderr.on('end', resolve))
+  ]);
+
+  if (settings.content) {
+    utils.deleteFile(tempFile);
+  }
+
+  const exitCode = results[0];
+
+  if (stdErrData.trim().length > 0) {
+    console.log('stdErrData', stdErrData);
+    if (exitCode > 0 && callback) {
+      return callback(stdErrData);
+    }
+  }
+
   if (!settings.content) {
-    utils.writeFile({ file: settings.output, content: contentMinified.compiledCode, index });
+    utils.writeFile({ file: settings.output, content: stdOutData, index });
   }
 
   /**
@@ -68,18 +102,18 @@ const minifyGCC = ({ settings, content, callback, index }) => {
    * otherwise use createSourceMap as the file path.
    */
 
-  if (settings.options.createSourceMap) {
-    const sourceMapOutput =
-      typeof settings.options.createSourceMap === 'boolean'
-        ? settings.output + '.map'
-        : settings.options.createSourceMap;
-    utils.writeFile({ file: sourceMapOutput, content: contentMinified.sourceMap, index });
-  }
+  // if (settings.options.createSourceMap) {
+  //   const sourceMapOutput =
+  //     typeof settings.options.createSourceMap === 'boolean'
+  //       ? settings.output + '.map'
+  //       : settings.options.createSourceMap;
+  //   utils.writeFile({ file: sourceMapOutput, content: compilerProcess.sourceMap, index });
+  // }
 
   if (callback) {
-    return callback(null, contentMinified.compiledCode);
+    return callback(null, stdOutData);
   }
-  return contentMinified.compiledCode;
+  return stdOutData;
 };
 
 /**

@@ -17,8 +17,8 @@ describe('Package: cli', () => {
       .run({
         compressor: 'google-closure-compiler',
         input: filesJS.oneFile,
-        output: filesJS.fileJSOut,
-        option: '{"createSourceMap": true}'
+        output: filesJS.fileJSOut
+        // option: '{"createSourceMap": true}'
       })
       .then(() => expect(spy).toHaveBeenCalled());
   });
